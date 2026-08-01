@@ -39,13 +39,14 @@
 
       <!-- HOME -->
       <section class="view" id="view-home">
-        <h1>🏠 Home</h1>
+        <h1 tabindex="-1">🏠 Home</h1>
         <p class="view-subtitle">Your bakery's command center — quick actions and a look at what's happening.</p>
         <div class="quick-actions">
           <button class="btn btn-primary btn-big" id="qa-invoice">➕ Enter Invoice / Purchase</button>
           <button class="btn btn-primary btn-big" id="qa-recipe">➕ Add Recipe</button>
           <button class="btn btn-primary btn-big" id="qa-bake">➕ Log a Bake</button>
         </div>
+        <div id="home-restock-alert"></div>
         <div class="summary-cards" id="summary-cards"></div>
         <h2 class="section-subtitle">Recent Activity</h2>
         <div id="recent-activity" class="activity-list"></div>
@@ -55,12 +56,14 @@
       <section class="view hidden" id="view-inventory">
         <div class="view-header">
           <div>
-            <h1>📦 Inventory</h1>
+            <h1 tabindex="-1">📦 Inventory</h1>
             <p class="view-subtitle">Track what's in your pantry and what you paid for it.</p>
           </div>
           <button class="btn btn-primary" id="inv-add-invoice">➕ Enter Invoice</button>
         </div>
         <div class="summary-cards" id="inventory-summary"></div>
+        <div id="inventory-restock-alert"></div>
+        <input type="text" id="inventory-search" class="search-input" placeholder="🔍 Search ingredients...">
         <div class="table-scroll">
         <table class="data-table" id="inventory-table">
           <thead>
@@ -81,18 +84,21 @@
           <p>Your pantry's empty so far — log your first purchase to get started.</p>
           <button type="button" class="btn btn-primary btn-small" id="inventory-empty-cta">➕ Enter Invoice</button>
         </div>
+        <p class="empty-state hidden" id="inventory-search-empty">No ingredients match your search.</p>
       </section>
 
       <!-- RECIPES -->
       <section class="view hidden" id="view-recipes">
         <div class="view-header">
           <div>
-            <h1>📖 Recipes</h1>
+            <h1 tabindex="-1">📖 Recipes</h1>
             <p class="view-subtitle">Your recipe book — costs, instructions, and version history in one place.</p>
           </div>
           <button class="btn btn-primary" id="rec-add-recipe">➕ Add Recipe</button>
         </div>
+        <input type="text" id="recipes-search" class="search-input" placeholder="🔍 Search recipes...">
         <div id="recipes-groups"></div>
+        <p class="empty-state hidden" id="recipes-search-empty">No recipes match your search.</p>
         <div class="empty-state-card hidden" id="recipes-empty">
           <div class="empty-icon">📖</div>
           <p>Your recipe book is blank — add your first recipe to start costing it out.</p>
@@ -105,7 +111,7 @@
         <div class="view-header">
           <button class="btn btn-ghost" id="rd-back">← Back to Recipes</button>
         </div>
-        <h1 id="rd-title"></h1>
+        <h1 id="rd-title" tabindex="-1"></h1>
         <div class="tabs">
           <button class="tab-btn active" data-tab="current">Current Recipe</button>
           <button class="tab-btn" data-tab="history">Bake History</button>
@@ -118,7 +124,7 @@
       <section class="view hidden" id="view-bakelog">
         <div class="view-header">
           <div>
-            <h1>🧾 Bake Log</h1>
+            <h1 tabindex="-1">🧾 Bake Log</h1>
             <p class="view-subtitle">Every bake you've logged, and what it actually cost you.</p>
           </div>
           <button class="btn btn-primary" id="bl-add-bake">➕ Log a Bake</button>
@@ -155,8 +161,8 @@
 <div id="modal-overlay" class="modal-overlay hidden">
 
   <!-- Invoice / Purchase dialog -->
-  <div class="modal" id="modal-invoice">
-    <h2>Enter Invoice / Purchase</h2>
+  <div class="modal" id="modal-invoice" role="dialog" aria-modal="true" aria-labelledby="invoice-modal-title">
+    <h2 id="invoice-modal-title">Enter Invoice / Purchase</h2>
     <form id="form-invoice">
       <label>Ingredient
         <input type="text" id="inv-ingredient-name" list="ingredient-names" placeholder="e.g. All-Purpose Flour" required>
@@ -191,7 +197,7 @@
   </div>
 
   <!-- Recipe dialog -->
-  <div class="modal modal-wide" id="modal-recipe">
+  <div class="modal modal-wide" id="modal-recipe" role="dialog" aria-modal="true" aria-labelledby="recipe-modal-title">
     <h2 id="recipe-modal-title">Add Recipe</h2>
     <form id="form-recipe">
       <div class="recipe-form-grid">
@@ -281,8 +287,8 @@
   </div>
 
   <!-- Bake dialog -->
-  <div class="modal" id="modal-bake">
-    <h2>Log a Bake</h2>
+  <div class="modal" id="modal-bake" role="dialog" aria-modal="true" aria-labelledby="bake-modal-title">
+    <h2 id="bake-modal-title">Log a Bake</h2>
     <form id="form-bake">
       <label>Recipe
         <select id="bake-recipe" required></select>
@@ -305,7 +311,7 @@
   </div>
 
   <!-- Confirm dialog -->
-  <div class="modal modal-confirm" id="modal-confirm">
+  <div class="modal modal-confirm" id="modal-confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
     <h2 id="confirm-title">Are you sure?</h2>
     <p id="confirm-message"></p>
     <div class="modal-actions">

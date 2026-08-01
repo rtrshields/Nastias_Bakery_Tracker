@@ -139,6 +139,54 @@ function computeRecipeCost(version) {
   return version.lines.reduce((sum, l) => sum + computeLineCost(l), 0);
 }
 
+// ---------- Restock alerts ----------
+// "Low" has no manual setting — it's the smallest amount any of her own recipes
+// needs per batch. Below that, she can't complete even her smallest recipe using
+// this ingredient without buying more. Ingredients not used in any recipe yet only
+// get the "out of stock" check, since there's no basis yet for what "enough" means.
+function getIngredientMinRecipeQty(ingredientName) {
+  const key = String(ingredientName || '').trim().toLowerCase();
+  let min = null;
+  state.recipes.forEach(r => {
+    currentVersion(r).lines.forEach(line => {
+      if (line.ingredientName.toLowerCase() === key) {
+        if (min === null || line.qtyCanonical < min) min = line.qtyCanonical;
+      }
+    });
+  });
+  return min;
+}
+function getRestockStatus(ingredient) {
+  if (ingredient.onHandQty <= 0) return 'out';
+  const minQty = getIngredientMinRecipeQty(ingredient.name);
+  if (minQty !== null && ingredient.onHandQty < minQty) return 'low';
+  return 'ok';
+}
+function renderRestockAlert(containerId) {
+  const container = document.getElementById(containerId);
+  const flagged = state.ingredients
+    .map(ing => ({ ing, status: getRestockStatus(ing) }))
+    .filter(x => x.status !== 'ok');
+  if (flagged.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  flagged.sort((a, b) => (a.status === 'out' ? 0 : 1) - (b.status === 'out' ? 0 : 1));
+  const items = flagged.map(({ ing, status }) => {
+    if (status === 'out') {
+      return `<li><span class="stock-badge out">Out</span> ${escapeHtml(ing.name)} — 0 left</li>`;
+    }
+    const minQty = getIngredientMinRecipeQty(ing.name);
+    return `<li><span class="stock-badge low">Low</span> ${escapeHtml(ing.name)} — ${formatQty(ing.category, ing.onHandQty)} left, smallest recipe needs ${formatQty(ing.category, minQty)}</li>`;
+  }).join('');
+  container.innerHTML = `
+    <div class="restock-alert">
+      <h3>⚠️ Needs Restocking</h3>
+      <ul>${items}</ul>
+    </div>
+  `;
+}
+
 // ---------- Persistence ----------
 function loadState() {
   try {
@@ -173,13 +221,62 @@ function setActiveNav(section) {
 
 // ---------- Modal management ----------
 let confirmResolve = null;
+let lastFocusedElement = null;
+function getFocusableElements(container) {
+  return Array.from(container.querySelectorAll(
+    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )).filter(el => el.offsetParent !== null);
+}
 function openModal(id) {
+  lastFocusedElement = document.activeElement;
   document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden'));
-  document.getElementById(id).classList.remove('hidden');
+  const modal = document.getElementById(id);
+  modal.classList.remove('hidden');
   document.getElementById('modal-overlay').classList.remove('hidden');
+  const focusables = getFocusableElements(modal);
+  (focusables[0] || modal).focus();
 }
 function closeModal() {
   document.getElementById('modal-overlay').classList.add('hidden');
+  // Some quick actions navigate to a different section before opening their modal
+  // (see goToSectionAnd), so the original trigger button may now be hidden and
+  // unable to receive focus back — fall back to the heading of whatever section
+  // is visible now instead of leaving focus stranded.
+  const canRefocusTrigger = lastFocusedElement && typeof lastFocusedElement.focus === 'function' && lastFocusedElement.offsetParent !== null;
+  if (canRefocusTrigger) {
+    lastFocusedElement.focus();
+  } else {
+    const heading = document.querySelector('.view:not(.hidden) h1');
+    if (heading) heading.focus();
+  }
+  lastFocusedElement = null;
+}
+// Keeps keyboard focus inside the open modal (Tab wraps at the ends) and lets
+// Escape close it, same as clicking the backdrop.
+function handleModalKeydown(e) {
+  const overlay = document.getElementById('modal-overlay');
+  if (overlay.classList.contains('hidden')) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeModal();
+    if (confirmResolve) { confirmResolve(false); confirmResolve = null; }
+    return;
+  }
+  if (e.key === 'Tab') {
+    const visibleModal = Array.from(document.querySelectorAll('.modal')).find(m => !m.classList.contains('hidden'));
+    if (!visibleModal) return;
+    const focusables = getFocusableElements(visibleModal);
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 }
 // Resolves true (ok), false (cancel), or 'alt' (the optional third choice) when provided.
 function confirmDialog(message, title, okLabel, altLabel) {
@@ -338,7 +435,7 @@ function addRecipeLine(prefill) {
     <label class="fallback-cost" title="Used automatically once this ingredient is out of stock or hasn't been purchased yet">Backup cost ($)
       <input type="number" class="line-fallback" min="0" step="0.01" value="${prefill && prefill.fallbackCost != null ? prefill.fallbackCost : ''}">
     </label>
-    <button type="button" class="btn btn-danger line-remove">✕</button>
+    <button type="button" class="btn btn-danger line-remove" aria-label="Remove ingredient line">✕</button>
   `;
   container.appendChild(div);
 
@@ -389,9 +486,9 @@ function addStepRow(text) {
     <span class="step-number">1</span>
     <textarea class="step-text" rows="1" placeholder="e.g. Cream butter and sugar until fluffy">${escapeHtml(text || '')}</textarea>
     <div class="step-actions">
-      <button type="button" class="btn-icon step-up" title="Move up">↑</button>
-      <button type="button" class="btn-icon step-down" title="Move down">↓</button>
-      <button type="button" class="btn-icon step-remove" title="Remove step">✕</button>
+      <button type="button" class="btn-icon step-up" title="Move up" aria-label="Move step up">↑</button>
+      <button type="button" class="btn-icon step-down" title="Move down" aria-label="Move step down">↓</button>
+      <button type="button" class="btn-icon step-remove" title="Remove step" aria-label="Remove step">✕</button>
     </div>
   `;
   container.appendChild(div);
@@ -528,6 +625,34 @@ function wireRecipeModal() {
   });
 }
 
+function duplicateRecipe(recipeId) {
+  const recipe = findRecipeById(recipeId);
+  if (!recipe) return;
+  const v = currentVersion(recipe);
+  const newName = `${recipe.name} (Copy)`;
+  const newRecipe = {
+    id: uid(),
+    name: newName,
+    category: recipe.category,
+    versions: [Object.assign({}, v, {
+      id: uid(),
+      createdAt: Date.now(),
+      versionNumber: 1,
+      date: todayISO(),
+      name: newName,
+      lines: JSON.parse(JSON.stringify(v.lines)),
+      steps: (v.steps || []).slice()
+    })]
+  };
+  state.recipes.push(newRecipe);
+  saveState();
+  showToast(`Duplicated as "${newName}" — rename it below.`, 'success');
+  renderRecipes();
+  renderHome();
+  renderRecipeDetail(newRecipe.id);
+  openRecipeModal(newRecipe.id);
+}
+
 // ---------- Bake modal ----------
 function populateBakeRecipeSelect() {
   const select = document.getElementById('bake-recipe');
@@ -564,9 +689,10 @@ function updateBakeCostPreview() {
   preview.innerHTML =
     `<div class="big">Total Cost: ${formatMoney(totalCost)} • ${formatMoney(costPerItem)}/${escapeHtml(v.yieldLabel)}</div>${linesHtml}`;
 }
-function openBakeModal() {
+function openBakeModal(preselectRecipeId) {
   document.getElementById('form-bake').reset();
   populateBakeRecipeSelect();
+  if (preselectRecipeId) document.getElementById('bake-recipe').value = preselectRecipeId;
   document.getElementById('bake-batches').value = 1;
   updateBakeCostPreview();
   openModal('modal-bake');
@@ -619,6 +745,7 @@ function summaryCard(value, label, icon) {
   return `<div class="summary-card">${icon ? `<span class="icon">${icon}</span>` : ''}<div class="value">${value}</div><div class="label">${label}</div></div>`;
 }
 function renderHome() {
+  renderRestockAlert('home-restock-alert');
   const totalInventoryValue = state.ingredients.reduce((sum, i) => sum + i.onHandQty * i.unitCost, 0);
   const monthPrefix = todayISO().slice(0, 7);
   const spentThisMonth = state.purchases
@@ -647,20 +774,35 @@ function renderInventorySummary() {
     summaryCard(formatMoney(totalValue), 'Total Inventory Value', '💰') +
     summaryCard(state.ingredients.length, 'Ingredients Tracked', '🧺');
 }
+let inventorySearchTerm = '';
 function renderInventory() {
+  renderRestockAlert('inventory-restock-alert');
   const tbody = document.querySelector('#inventory-table tbody');
   const table = document.getElementById('inventory-table');
   const empty = document.getElementById('inventory-empty');
+  const searchEmpty = document.getElementById('inventory-search-empty');
+  const term = inventorySearchTerm.trim().toLowerCase();
+  const visible = state.ingredients.filter(ing => !term || ing.name.toLowerCase().includes(term));
+
   if (state.ingredients.length === 0) {
     table.classList.add('hidden');
     empty.classList.remove('hidden');
+    searchEmpty.classList.add('hidden');
+    tbody.innerHTML = '';
+  } else if (visible.length === 0) {
+    table.classList.add('hidden');
+    empty.classList.add('hidden');
+    searchEmpty.classList.remove('hidden');
     tbody.innerHTML = '';
   } else {
     table.classList.remove('hidden');
     empty.classList.add('hidden');
-    tbody.innerHTML = state.ingredients.map(ing => {
+    searchEmpty.classList.add('hidden');
+    tbody.innerHTML = visible.map(ing => {
       const value = ing.onHandQty * ing.unitCost;
-      const rowClass = ing.onHandQty < 0 ? 'negative' : '';
+      const status = getRestockStatus(ing);
+      const rowClass = status === 'out' ? 'negative' : status === 'low' ? 'low-stock' : '';
+      const badge = status === 'out' ? ' <span class="stock-badge out">Out</span>' : status === 'low' ? ' <span class="stock-badge low">Low</span>' : '';
       if (inventoryEditingId === ing.id) {
         return `<tr class="${rowClass}" data-id="${ing.id}">
           <td>${escapeHtml(ing.name)}</td>
@@ -674,7 +816,7 @@ function renderInventory() {
       return `<tr class="${rowClass}" data-id="${ing.id}">
         <td>${escapeHtml(ing.name)}</td>
         <td>${capitalize(ing.category)}</td>
-        <td class="num-col">${formatQty(ing.category, ing.onHandQty)}</td>
+        <td class="num-col">${formatQty(ing.category, ing.onHandQty)}${badge}</td>
         <td class="num-col">${formatUnitCost(ing.unitCost)}/${canonicalUnitLabel(ing.category)}</td>
         <td class="num-col">${formatMoney(value)}</td>
         <td><button class="btn btn-ghost btn-small inv-edit">Edit</button> <button class="btn btn-danger btn-small inv-delete">Delete</button></td>
@@ -735,17 +877,30 @@ function wireInventoryTable() {
 }
 
 // ---------- Rendering: Recipes list ----------
+let recipesSearchTerm = '';
 function renderRecipes() {
   const container = document.getElementById('recipes-groups');
   const empty = document.getElementById('recipes-empty');
+  const searchEmpty = document.getElementById('recipes-search-empty');
   if (state.recipes.length === 0) {
     container.innerHTML = '';
     empty.classList.remove('hidden');
+    searchEmpty.classList.add('hidden');
     return;
   }
   empty.classList.add('hidden');
+  const term = recipesSearchTerm.trim().toLowerCase();
+  const visible = state.recipes.filter(r =>
+    !term || r.name.toLowerCase().includes(term) || (r.category || '').toLowerCase().includes(term)
+  );
+  if (visible.length === 0) {
+    container.innerHTML = '';
+    searchEmpty.classList.remove('hidden');
+    return;
+  }
+  searchEmpty.classList.add('hidden');
   const groups = {};
-  state.recipes.forEach(r => {
+  visible.forEach(r => {
     const cat = r.category || 'Other';
     (groups[cat] = groups[cat] || []).push(r);
   });
@@ -767,6 +922,7 @@ function renderRecipes() {
         ${badges.length ? `<div class="recipe-meta-row">${badges.join('')}</div>` : ''}
         <div class="cost-line">${formatMoney(costPerItem)} / item</div>
         <div class="muted">Total: ${formatMoney(totalCost)}</div>
+        <button type="button" class="btn btn-ghost btn-small recipe-card-bake" data-id="${r.id}">🥄 Bake This</button>
       </div>`;
     }).join('');
     return `<div class="recipe-category-group" style="--cat-color:${color}"><h2><span class="card-suit">${suit}</span> ${escapeHtml(cat)}</h2><div class="recipe-cards">${cards}</div></div>`;
@@ -775,6 +931,12 @@ function renderRecipes() {
     card.addEventListener('click', () => {
       showView('recipe-detail');
       renderRecipeDetail(card.dataset.id);
+    });
+  });
+  container.querySelectorAll('.recipe-card-bake').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      openBakeModal(btn.dataset.id);
     });
   });
 }
@@ -814,6 +976,8 @@ function renderRecipeDetail(recipeId) {
     <div class="view-header">
       <div class="muted">${escapeHtml(recipe.category)}</div>
       <div>
+        <button class="btn btn-primary btn-small" id="rd-bake">🥄 Bake This</button>
+        <button class="btn btn-ghost btn-small" id="rd-duplicate">📋 Duplicate</button>
         <button class="btn btn-ghost btn-small" id="rd-edit">✏️ Edit Recipe</button>
         <button class="btn btn-danger btn-small" id="rd-delete">🗑 Delete Recipe</button>
       </div>
@@ -826,6 +990,8 @@ function renderRecipeDetail(recipeId) {
     ${stepsHtml}
     ${v.notes ? `<h3>Notes</h3><p>${escapeHtml(v.notes)}</p>` : ''}
   `;
+  document.getElementById('rd-bake').addEventListener('click', () => openBakeModal(recipe.id));
+  document.getElementById('rd-duplicate').addEventListener('click', () => duplicateRecipe(recipe.id));
   document.getElementById('rd-edit').addEventListener('click', () => openRecipeModal(recipe.id));
   document.getElementById('rd-delete').addEventListener('click', async () => {
     const ok = await confirmDialog(`Delete "${recipe.name}"? This cannot be undone. Its bake history will be kept.`, 'Delete recipe?');
@@ -1130,6 +1296,16 @@ function goToSectionAnd(section, renderFn, openFn) {
   renderFn();
   openFn();
 }
+function wireSearch() {
+  document.getElementById('inventory-search').addEventListener('input', e => {
+    inventorySearchTerm = e.target.value;
+    renderInventory();
+  });
+  document.getElementById('recipes-search').addEventListener('input', e => {
+    recipesSearchTerm = e.target.value;
+    renderRecipes();
+  });
+}
 function wireModals() {
   document.querySelectorAll('.modal-cancel').forEach(btn => btn.addEventListener('click', closeModal));
   document.getElementById('modal-overlay').addEventListener('click', e => {
@@ -1146,11 +1322,11 @@ function wireModals() {
 
   document.getElementById('inv-add-invoice').addEventListener('click', openInvoiceModal);
   document.getElementById('rec-add-recipe').addEventListener('click', () => openRecipeModal(null));
-  document.getElementById('bl-add-bake').addEventListener('click', openBakeModal);
+  document.getElementById('bl-add-bake').addEventListener('click', () => openBakeModal());
 
   document.getElementById('inventory-empty-cta').addEventListener('click', openInvoiceModal);
   document.getElementById('recipes-empty-cta').addEventListener('click', () => openRecipeModal(null));
-  document.getElementById('bakelog-empty-cta').addEventListener('click', openBakeModal);
+  document.getElementById('bakelog-empty-cta').addEventListener('click', () => openBakeModal());
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1159,10 +1335,12 @@ document.addEventListener('DOMContentLoaded', () => {
   wireMobileMenu();
   wireModals();
   wireConfirmModal();
+  document.addEventListener('keydown', handleModalKeydown);
   wireInvoiceModal();
   wireRecipeModal();
   wireBakeModal();
   wireInventoryTable();
+  wireSearch();
   wireBackup();
   renderAll();
   showView('home');
