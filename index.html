@@ -12,7 +12,10 @@
 
   <!-- Top bar -->
   <header id="topbar">
-    <div class="topbar-title">🧁 Nastia's Bakery Tracker</div>
+    <div class="topbar-left">
+      <button id="menu-toggle" class="menu-toggle" aria-label="Open menu">☰</button>
+      <div class="topbar-title">🧁 Nastia's Bakery Tracker</div>
+    </div>
     <div class="topbar-actions">
       <span id="saved-indicator" class="saved-indicator">Saved</span>
       <button class="btn btn-ghost" id="btn-export">⬇ Export Backup</button>
@@ -22,6 +25,7 @@
   </header>
 
   <div id="body-row">
+    <div id="sidebar-backdrop" class="sidebar-backdrop hidden"></div>
     <!-- Sidebar -->
     <nav id="sidebar">
       <button class="nav-item active" data-section="home"><span class="nav-icon">🏠</span> Home</button>

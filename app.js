@@ -1085,6 +1085,7 @@ function wireNavigation() {
       if (section === 'inventory') renderInventory();
       if (section === 'recipes') renderRecipes();
       if (section === 'bakelog') renderBakeLog();
+      closeMobileMenu();
     });
   });
   document.getElementById('rd-back').addEventListener('click', () => {
@@ -1099,6 +1100,19 @@ function wireNavigation() {
       document.getElementById('rd-tab-history').classList.toggle('hidden', btn.dataset.tab !== 'history');
     });
   });
+}
+// ---------- Mobile drawer menu ----------
+function closeMobileMenu() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.add('hidden');
+}
+function wireMobileMenu() {
+  document.getElementById('menu-toggle').addEventListener('click', () => {
+    const sidebar = document.getElementById('sidebar');
+    const isOpen = sidebar.classList.toggle('open');
+    document.getElementById('sidebar-backdrop').classList.toggle('hidden', !isOpen);
+  });
+  document.getElementById('sidebar-backdrop').addEventListener('click', closeMobileMenu);
 }
 function goToSectionAnd(section, renderFn, openFn) {
   setActiveNav(section);
@@ -1132,6 +1146,7 @@ function wireModals() {
 document.addEventListener('DOMContentLoaded', () => {
   loadState();
   wireNavigation();
+  wireMobileMenu();
   wireModals();
   wireConfirmModal();
   wireInvoiceModal();

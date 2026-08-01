@@ -110,11 +110,36 @@ h1, h2, h3, .topbar-title, .recipe-card h3 {
   position: relative;
   z-index: 2;
 }
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .topbar-title {
   font-size: 1.55rem;
   font-weight: 700;
   color: var(--blue);
   letter-spacing: 0.02em;
+}
+.menu-toggle {
+  display: none;
+  background: var(--blue-light);
+  color: var(--blue-dark);
+  border: none;
+  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  font-size: 1.2rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.menu-toggle:hover { background: var(--accent-soft); }
+
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 22, 45, 0.5);
+  z-index: 140;
 }
 .topbar-actions {
   display: flex;
@@ -651,6 +676,7 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 .step-number {
   flex: 0 0 auto;
@@ -665,7 +691,7 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
   justify-content: center;
 }
-.step-row .step-text { flex: 1; margin-bottom: 0; }
+.step-row .step-text { flex: 1 1 160px; min-width: 0; margin-bottom: 0; }
 .step-actions { display: flex; gap: 4px; flex: 0 0 auto; }
 .btn-icon {
   background: transparent;
@@ -776,24 +802,24 @@ input:focus, select:focus, textarea:focus {
   .topbar-actions { flex-wrap: wrap; gap: 8px; }
   .topbar-actions .btn { padding: 8px 12px; font-size: 0.85rem; }
 
-  #body-row { flex-direction: column; }
+  .menu-toggle { display: inline-flex; align-items: center; justify-content: center; }
+
+  /* Sidebar becomes a slide-in drawer, opened via the hamburger button, instead
+     of a permanent strip — keeps the full screen available for content. */
   #sidebar {
-    width: 100%;
-    flex-direction: row;
-    align-items: center;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    padding: 10px 12px;
-    gap: 6px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 250px;
+    max-width: 80vw;
+    z-index: 150;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    border-right: 1px solid var(--border);
+    box-shadow: 6px 0 24px rgba(15, 22, 45, 0.25);
   }
-  .nav-item {
-    flex: 0 0 auto;
-    padding: 9px 14px;
-    font-size: 0.9rem;
-    white-space: nowrap;
-  }
+  #sidebar.open { transform: translateX(0); }
   .nav-item:hover { transform: none; }
 
   #content { padding: 18px 14px; }
