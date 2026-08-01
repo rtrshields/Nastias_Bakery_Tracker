@@ -214,9 +214,13 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 18px;
 }
 .view-header h1 { margin: 0; }
+.view-header > div:first-child { flex: 1 1 260px; min-width: 0; }
+.view-header > .btn { flex-shrink: 0; }
 
 /* Buttons */
 .btn {
@@ -621,7 +625,7 @@ input:focus, select:focus, textarea:focus {
 /* Form sections (grouped fieldsets) */
 .recipe-form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
   gap: 20px;
   align-items: start;
 }
@@ -746,4 +750,59 @@ input:focus, select:focus, textarea:focus {
 .toast.toast-success { border-left-color: var(--accent-dark); }
 .toast.toast-leaving { animation: toastOut 0.2s ease-in forwards; }
 @keyframes toastIn { from { transform: translateX(30px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* Tables scroll horizontally on their own rather than breaking the page layout */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius);
+}
+.table-scroll .data-table { border-radius: 0; }
+
+/* ---------- Responsive: tablet ---------- */
+@media (max-width: 900px) {
+  #content { padding: 22px 20px; }
+  .modal { padding: 22px 20px; }
+}
+
+/* ---------- Responsive: phone ---------- */
+@media (max-width: 640px) {
+  .topbar-title { font-size: 1.15rem; }
+  #topbar {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+  .topbar-actions { flex-wrap: wrap; gap: 8px; }
+  .topbar-actions .btn { padding: 8px 12px; font-size: 0.85rem; }
+
+  #body-row { flex-direction: column; }
+  #sidebar {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 12px;
+    gap: 6px;
+  }
+  .nav-item {
+    flex: 0 0 auto;
+    padding: 9px 14px;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+  .nav-item:hover { transform: none; }
+
+  #content { padding: 18px 14px; }
+  h1 { font-size: 1.5rem; }
+
+  .quick-actions { gap: 10px; }
+  .btn-big { min-width: 100%; padding: 18px 16px; font-size: 1rem; }
+
+  .modal, .modal-wide { width: 100%; max-width: 100%; }
+  .recipe-line, .step-row { gap: 8px; }
+}
 @keyframes toastOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(30px); opacity: 0; } }

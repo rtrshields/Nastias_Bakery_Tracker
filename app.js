@@ -780,7 +780,7 @@ function renderRecipeDetail(recipeId) {
     </div>
     <div class="recipe-meta-bar">${metaBadges.join('')}</div>
     <h3>Ingredients</h3>
-    <table class="data-table"><thead><tr><th>Ingredient</th><th>Qty</th><th class="num-col">Cost</th></tr></thead><tbody>${linesHtml}</tbody></table>
+    <div class="table-scroll"><table class="data-table"><thead><tr><th>Ingredient</th><th>Qty</th><th class="num-col">Cost</th></tr></thead><tbody>${linesHtml}</tbody></table></div>
     <div class="cost-preview"><span class="big">Total: ${formatMoney(totalCost)}</span> • ${formatMoney(costPerItem)} / ${escapeHtml(v.yieldLabel)}</div>
     <h3>Steps</h3>
     ${stepsHtml}
