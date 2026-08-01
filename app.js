@@ -387,7 +387,7 @@ function addStepRow(text) {
   div.className = 'step-row';
   div.innerHTML = `
     <span class="step-number">1</span>
-    <input type="text" class="step-text" value="${escapeHtml(text || '')}" placeholder="e.g. Cream butter and sugar until fluffy">
+    <textarea class="step-text" rows="1" placeholder="e.g. Cream butter and sugar until fluffy">${escapeHtml(text || '')}</textarea>
     <div class="step-actions">
       <button type="button" class="btn-icon step-up" title="Move up">↑</button>
       <button type="button" class="btn-icon step-down" title="Move down">↓</button>
@@ -395,6 +395,16 @@ function addStepRow(text) {
     </div>
   `;
   container.appendChild(div);
+  const textarea = div.querySelector('.step-text');
+  const maxHeight = 200;
+  const autoGrow = () => {
+    textarea.style.height = 'auto';
+    const capped = Math.min(textarea.scrollHeight, maxHeight);
+    textarea.style.height = capped + 'px';
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  };
+  textarea.addEventListener('input', autoGrow);
+  autoGrow();
   div.querySelector('.step-remove').addEventListener('click', () => { div.remove(); renumberSteps(); });
   div.querySelector('.step-up').addEventListener('click', () => {
     const prev = div.previousElementSibling;
