@@ -27,7 +27,13 @@ function categoryEmoji(category) {
 }
 
 // ---------- State ----------
-let state = { ingredients: [], recipes: [], bakeLog: [], purchases: [] };
+// A function, not a shared object — Object.assign only shallow-copies, so a constant
+// object here would let every push() onto state.ingredients etc. silently mutate the
+// "empty defaults" template too, since both would point at the same array.
+function getDefaultState() {
+  return { ingredients: [], recipes: [], bakeLog: [], purchases: [], adjustments: [], tombstones: [] };
+}
+let state = getDefaultState();
 let currentView = 'home';
 let currentDetailRecipeId = null;
 let editingRecipeId = null;
@@ -79,6 +85,12 @@ function escapeHtml(str) {
 function toCanonical(category, unit, qty) {
   const factor = UNIT_DEFS[category].units[unit];
   return (qty || 0) * (factor == null ? 1 : factor);
+}
+function inferCategoryFromUnit(unit) {
+  for (const cat in UNIT_DEFS) {
+    if (UNIT_DEFS[cat].units[unit] != null) return cat;
+  }
+  return 'weight';
 }
 
 // ---------- Data lookups ----------
@@ -133,7 +145,7 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      state = Object.assign({ ingredients: [], recipes: [], bakeLog: [], purchases: [] }, parsed);
+      state = Object.assign({}, getDefaultState(), parsed);
     }
   } catch (e) {
     console.error('Failed to load saved data', e);
@@ -169,10 +181,14 @@ function openModal(id) {
 function closeModal() {
   document.getElementById('modal-overlay').classList.add('hidden');
 }
-function confirmDialog(message, title, okLabel) {
+// Resolves true (ok), false (cancel), or 'alt' (the optional third choice) when provided.
+function confirmDialog(message, title, okLabel, altLabel) {
   document.getElementById('confirm-title').textContent = title || 'Are you sure?';
   document.getElementById('confirm-message').textContent = message;
   document.getElementById('confirm-ok').textContent = okLabel || 'Delete';
+  const altBtn = document.getElementById('confirm-alt');
+  altBtn.hidden = !altLabel;
+  altBtn.textContent = altLabel || '';
   openModal('modal-confirm');
   return new Promise(resolve => { confirmResolve = resolve; });
 }
@@ -180,6 +196,10 @@ function wireConfirmModal() {
   document.getElementById('confirm-ok').addEventListener('click', () => {
     closeModal();
     if (confirmResolve) { confirmResolve(true); confirmResolve = null; }
+  });
+  document.getElementById('confirm-alt').addEventListener('click', () => {
+    closeModal();
+    if (confirmResolve) { confirmResolve('alt'); confirmResolve = null; }
   });
   document.getElementById('confirm-cancel').addEventListener('click', () => {
     closeModal();
@@ -283,7 +303,7 @@ function wireInvoiceModal() {
       ing = { id: uid(), name, category, onHandQty: qtyCanonical, unitCost: costPerCanonical, lastPurchaseDate: today };
       state.ingredients.push(ing);
     }
-    state.purchases.push({ id: uid(), date: today, ingredientName: name, qty, unit, price });
+    state.purchases.push({ id: uid(), createdAt: Date.now(), date: today, ingredientName: name, qty, unit, price });
     saveState();
     closeModal();
     showToast(`Logged purchase: ${name}`, 'success');
@@ -473,17 +493,20 @@ function wireRecipeModal() {
       return;
     }
     const today = todayISO();
-    const versionData = { yieldQty, yieldLabel, lines, notes, prepMinutes, bakeMinutes, ovenTemp, ovenTempUnit, steps };
+    // name/category are snapshotted onto the version itself (not just the recipe) so a
+    // merge can tell what they were at each edit, instead of one device's rename silently
+    // winning over another's just because its export was imported last.
+    const versionData = { name, category, yieldQty, yieldLabel, lines, notes, prepMinutes, bakeMinutes, ovenTemp, ovenTempUnit, steps };
     if (editingRecipeId) {
       const recipe = findRecipeById(editingRecipeId);
       const nextVersionNumber = currentVersion(recipe).versionNumber + 1;
       recipe.name = name;
       recipe.category = category;
-      recipe.versions.push(Object.assign({ versionNumber: nextVersionNumber, date: today }, versionData));
+      recipe.versions.push(Object.assign({ id: uid(), createdAt: Date.now(), versionNumber: nextVersionNumber, date: today }, versionData));
     } else {
       state.recipes.push({
         id: uid(), name, category,
-        versions: [Object.assign({ versionNumber: 1, date: today }, versionData)]
+        versions: [Object.assign({ id: uid(), createdAt: Date.now(), versionNumber: 1, date: today }, versionData)]
       });
     }
     saveState();
@@ -561,7 +584,7 @@ function wireBakeModal() {
     const totalYield = v.yieldQty * batches;
     const costPerItem = totalYield > 0 ? totalCost / totalYield : 0;
     state.bakeLog.push({
-      id: uid(), date: todayISO(), recipeId: recipe.id,
+      id: uid(), createdAt: Date.now(), date: todayISO(), recipeId: recipe.id,
       recipeSnapshot: {
         name: recipe.name, category: recipe.category, versionNumber: v.versionNumber,
         yieldQty: v.yieldQty, yieldLabel: v.yieldLabel, lines: JSON.parse(JSON.stringify(v.lines)),
@@ -662,6 +685,9 @@ async function deleteIngredient(id) {
   const ok = await confirmDialog(msg, 'Delete ingredient?');
   if (!ok) return;
   state.ingredients = state.ingredients.filter(i => i.id !== id);
+  // A tombstone means this deletion sticks even if a later merge brings in a backup
+  // from a device that still has this ingredient.
+  state.tombstones.push({ id: uid(), type: 'ingredient', targetId: id, deletedAt: Date.now() });
   saveState();
   renderInventory();
   renderHome();
@@ -684,8 +710,12 @@ function wireInventoryTable() {
       const ing = findIngredientById(id);
       const onHand = parseFloat(tr.querySelector('.edit-onhand').value);
       const unitCost = parseFloat(tr.querySelector('.edit-unitcost').value);
-      if (!isNaN(onHand)) ing.onHandQty = onHand;
-      if (!isNaN(unitCost)) ing.unitCost = unitCost;
+      const adjustment = { id: uid(), createdAt: Date.now(), date: todayISO(), ingredientName: ing.name };
+      if (!isNaN(onHand)) { ing.onHandQty = onHand; adjustment.onHandQty = onHand; }
+      if (!isNaN(unitCost)) { ing.unitCost = unitCost; adjustment.unitCost = unitCost; }
+      // Logged as its own event (like a purchase) so this correction survives a merge
+      // with another device instead of being silently overwritten by recomputed totals.
+      state.adjustments.push(adjustment);
       inventoryEditingId = null;
       saveState();
       renderInventory();
@@ -791,6 +821,7 @@ function renderRecipeDetail(recipeId) {
     const ok = await confirmDialog(`Delete "${recipe.name}"? This cannot be undone. Its bake history will be kept.`, 'Delete recipe?');
     if (ok) {
       state.recipes = state.recipes.filter(r => r.id !== recipe.id);
+      state.tombstones.push({ id: uid(), type: 'recipe', targetId: recipe.id, deletedAt: Date.now() });
       saveState();
       renderRecipes();
       renderHome();
@@ -855,6 +886,107 @@ function renderBakeLog() {
   renderBakeLogSummary(entries);
 }
 
+// ---------- Merge engine ----------
+// Combines this device's data with an imported backup without ever losing or
+// duplicating anything, so two devices can be synced by hand (e.g. via a shared
+// Drive folder) without one device's edits silently clobbering the other's.
+function unionById(a, b) {
+  const map = new Map();
+  (a || []).forEach(item => map.set(item.id, item));
+  (b || []).forEach(item => map.set(item.id, item));
+  return Array.from(map.values());
+}
+function eventTime(e) {
+  return e.createdAt || (e.date ? new Date(e.date).getTime() : 0) || 0;
+}
+// Ingredient on-hand quantity and cost are never merged directly — they're rebuilt
+// from the full combined purchase/adjustment/bake history, which is always correct
+// regardless of which device recorded what.
+function recomputeIngredientsFromHistory(purchases, adjustments, bakeLog, priorIngredients) {
+  const events = [];
+  purchases.forEach(p => events.push({ time: eventTime(p), type: 'purchase', ingredientName: p.ingredientName, qty: p.qty, unit: p.unit, price: p.price }));
+  adjustments.forEach(a => events.push({ time: eventTime(a), type: 'adjustment', ingredientName: a.ingredientName, onHandQty: a.onHandQty, unitCost: a.unitCost }));
+  bakeLog.forEach(b => {
+    (b.recipeSnapshot.lines || []).forEach(line => {
+      events.push({ time: eventTime(b), type: 'consume', ingredientName: line.ingredientName, qtyCanonical: line.qtyCanonical * b.batches });
+    });
+  });
+  events.sort((a, b) => a.time - b.time);
+
+  const existingIdByName = {};
+  (priorIngredients || []).forEach(ing => {
+    const key = ing.name.toLowerCase();
+    if (!existingIdByName[key]) existingIdByName[key] = ing.id;
+  });
+
+  const byName = {};
+  events.forEach(e => {
+    const key = e.ingredientName.toLowerCase();
+    if (e.type === 'consume') {
+      if (byName[key]) byName[key].onHandQty -= e.qtyCanonical;
+      return; // never deduct for an ingredient that was never purchased or adjusted
+    }
+    if (!byName[key]) {
+      byName[key] = {
+        id: existingIdByName[key] || uid(),
+        name: e.ingredientName,
+        category: e.type === 'purchase' ? inferCategoryFromUnit(e.unit) : 'weight',
+        onHandQty: 0,
+        unitCost: 0,
+        lastPurchaseDate: null
+      };
+    }
+    const ing = byName[key];
+    if (e.type === 'purchase') {
+      const qtyCanonical = toCanonical(ing.category, e.unit, e.qty);
+      const newOnHand = ing.onHandQty + qtyCanonical;
+      const costPerCanonical = qtyCanonical > 0 ? e.price / qtyCanonical : 0;
+      ing.unitCost = newOnHand !== 0
+        ? (ing.onHandQty * ing.unitCost + qtyCanonical * costPerCanonical) / newOnHand
+        : costPerCanonical;
+      ing.onHandQty = newOnHand;
+    } else if (e.type === 'adjustment') {
+      if (e.onHandQty != null) ing.onHandQty = e.onHandQty;
+      if (e.unitCost != null) ing.unitCost = e.unitCost;
+    }
+  });
+  return Object.values(byName);
+}
+// Recipe versions are unioned by their own permanent id, so if the same recipe was
+// edited differently on two devices before syncing, both edits survive as separate
+// versions (renumbered in date order) instead of one overwriting the other.
+function mergeRecipes(localRecipes, incomingRecipes) {
+  const byId = new Map();
+  [...localRecipes, ...incomingRecipes].forEach(r => {
+    if (!byId.has(r.id)) byId.set(r.id, { id: r.id, name: r.name, category: r.category, versions: [] });
+    const target = byId.get(r.id);
+    const versionMap = new Map();
+    target.versions.forEach(v => versionMap.set(v.id, v));
+    (r.versions || []).forEach(v => versionMap.set(v.id || uid(), v));
+    target.versions = Array.from(versionMap.values()).sort((a, b) => eventTime(a) - eventTime(b));
+    target.versions.forEach((v, i) => { v.versionNumber = i + 1; });
+    const latest = target.versions[target.versions.length - 1];
+    target.name = latest.name || target.name;
+    target.category = latest.category || target.category;
+  });
+  return Array.from(byId.values());
+}
+function mergeState(local, incoming) {
+  const purchases = unionById(local.purchases, incoming.purchases);
+  const adjustments = unionById(local.adjustments, incoming.adjustments);
+  const bakeLog = unionById(local.bakeLog, incoming.bakeLog);
+  const tombstones = unionById(local.tombstones, incoming.tombstones);
+  let recipes = mergeRecipes(local.recipes || [], incoming.recipes || []);
+  let ingredients = recomputeIngredientsFromHistory(purchases, adjustments, bakeLog, [...(local.ingredients || []), ...(incoming.ingredients || [])]);
+
+  const deletedRecipeIds = new Set(tombstones.filter(t => t.type === 'recipe').map(t => t.targetId));
+  const deletedIngredientIds = new Set(tombstones.filter(t => t.type === 'ingredient').map(t => t.targetId));
+  recipes = recipes.filter(r => !deletedRecipeIds.has(r.id));
+  ingredients = ingredients.filter(i => !deletedIngredientIds.has(i.id));
+
+  return { ingredients, recipes, bakeLog, purchases, adjustments, tombstones };
+}
+
 // ---------- Export / Import ----------
 function wireBackup() {
   document.getElementById('btn-export').addEventListener('click', () => {
@@ -883,12 +1015,48 @@ function wireBackup() {
           showToast("That file doesn't look like a valid backup.", 'error');
           return;
         }
-        const ok = await confirmDialog('This will replace all current data with the backup. Continue?', 'Import backup?', 'Import');
-        if (!ok) return;
-        state = Object.assign({ ingredients: [], recipes: [], bakeLog: [], purchases: [] }, parsed);
+        const choice = await confirmDialog(
+          "Merge this backup into what's already here? Anything new (purchases, recipes, bakes) gets added — nothing currently on this device is lost.",
+          'Import backup',
+          'Merge',
+          'Replace everything instead'
+        );
+        if (choice === false) return;
+        if (choice === 'alt') {
+          const reallyReplace = await confirmDialog(
+            'This throws away everything currently on this device and replaces it with exactly what’s in the backup file. This cannot be undone.',
+            'Replace all data?',
+            'Replace Everything'
+          );
+          if (!reallyReplace) return;
+          state = Object.assign({}, getDefaultState(), parsed);
+          saveState();
+          renderAll();
+          showToast('Data replaced from backup.', 'success');
+          return;
+        }
+        const countVersions = s => s.recipes.reduce((sum, r) => sum + r.versions.length, 0);
+        const before = {
+          p: state.purchases.length, r: state.recipes.length, b: state.bakeLog.length,
+          a: state.adjustments.length, v: countVersions(state)
+        };
+        state = mergeState(state, Object.assign({}, getDefaultState(), parsed));
         saveState();
         renderAll();
-        showToast('Backup imported.', 'success');
+        const added = {
+          p: state.purchases.length - before.p,
+          r: state.recipes.length - before.r,
+          b: state.bakeLog.length - before.b,
+          a: state.adjustments.length - before.a,
+          v: countVersions(state) - before.v
+        };
+        const parts = [];
+        if (added.p > 0) parts.push(`${added.p} purchase${added.p === 1 ? '' : 's'}`);
+        if (added.r > 0) parts.push(`${added.r} new recipe${added.r === 1 ? '' : 's'}`);
+        else if (added.v > 0) parts.push(`${added.v} recipe update${added.v === 1 ? '' : 's'}`);
+        if (added.b > 0) parts.push(`${added.b} bake${added.b === 1 ? '' : 's'}`);
+        if (added.a > 0) parts.push(`${added.a} inventory correction${added.a === 1 ? '' : 's'}`);
+        showToast(parts.length ? `Merged: added ${parts.join(', ')}.` : 'Merged — nothing new to add.', 'success');
       } catch (err) {
         showToast('Could not read that file: ' + err.message, 'error');
       }
